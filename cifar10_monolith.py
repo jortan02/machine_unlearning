@@ -8,7 +8,6 @@ import torch.utils.data as data
 import tqdm
 
 
-
 def main():
     with open(f"monolith_training_results.csv", "w") as file:
         file.write("chunk,epoch,loss,accuracy\n")
@@ -91,7 +90,9 @@ def main():
 
         if chunk_number + 1 < chunks:
             working_train_set_data = torch.cat((working_train_set_data, train_set_chunks_data[chunk_number + 1]))
-            working_train_set_targets = torch.cat((working_train_set_targets, train_set_chunks_targets[chunk_number + 1]))
+            working_train_set_targets = torch.cat(
+                (working_train_set_targets, train_set_chunks_targets[chunk_number + 1])
+            )
 
         print("Chunk:", chunk_number + 2, "New Data Size", len(working_train_set_data))
     end = time.time()

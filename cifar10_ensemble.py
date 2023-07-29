@@ -21,7 +21,7 @@ class Ensemble(nn.Module):
 
 def main():
     with open("ensemble_training_results.csv", "w") as file:
-        file.write("model,chunk,epoch,loss,accuracy\n")
+        file.write("model,chunk,valid,epoch,loss,accuracy\n")
 
     with open("ensemble_evaluation_results.csv", "w") as file:
         file.write("chunk,n_retrained,loss,accuracy\n")
@@ -53,7 +53,7 @@ def main():
     train_set_chunks_targets = torch.tensor(train_set.targets).chunk(chunks)
 
     test_set = torchvision.datasets.CIFAR10(root="./data", train=False, download=True, transform=transform)
-    test_loader = torch.utils.data.DataLoader(test_set, batch_size=batch_size, shuffle=False, num_workers=8)
+    test_loader = torch.utils.data.DataLoader(test_set, batch_size=batch_size, shuffle=False, num_workers=6)
 
     models = [None] * num_models
     valid = [False] * num_models
@@ -83,21 +83,33 @@ def main():
                 model = torchvision.models.resnet18(num_classes=10).to(device)
                 models[model_index] = model
                 valid[model_index] = True
+                retrain = True
                 data_usages[model_index] = set(np.unique(train_sample_indices.numpy()))
             else:
                 model = models[model_index]
                 data_usages[model_index].update(np.unique(train_sample_indices.numpy()).tolist())
+                retrain = False
             criterion = nn.CrossEntropyLoss()
             optimizer = optim.Adam(model.parameters(), lr=learning_rate)
             train_loader = torch.utils.data.DataLoader(
-                train_set_samples, batch_size=batch_size, shuffle=True, num_workers=8
+                train_set_samples, batch_size=batch_size, shuffle=True, num_workers=6
             )
-            train_individual(model, optimizer, criterion, train_loader, test_loader, model_index, chunk_number, epochs, device)
+            train_individual(
+                model,
+                optimizer,
+                criterion,
+                train_loader,
+                test_loader,
+                model_index,
+                chunk_number,
+                not retrain,
+                epochs,
+                device,
+            )
             """Setting model to ensemble"""
             data_usages[model_index] = set(np.unique(train_sample_indices.numpy()))
 
         evaluate_ensemble(device, test_loader, models, valid, chunk_number, criterion)
-
 
         """Deletion request phase: completed in the next loop"""
         if chunk_number == chunks - 1:
@@ -117,6 +129,7 @@ def main():
     end = time.time()
     print("Time:", end - start)
 
+
 def evaluate_ensemble(device, test_loader, models, valid, chunk_number, criterion):
     ensemble = Ensemble(models).to(device)
     ensemble.eval()
@@ -134,15 +147,18 @@ def evaluate_ensemble(device, test_loader, models, valid, chunk_number, criterio
             n_examples += labels.shape[0]
 
         progress_bar.set_postfix_str(
-                    f"Mean Loss: {validation_loss / n_examples:.5f}, Accuracy: {n_correct / n_examples:.4f}"
-                )
+            f"Mean Loss: {validation_loss / n_examples:.5f}, Accuracy: {n_correct / n_examples:.4f}"
+        )
     with open("ensemble_evaluation_results.csv", "a") as file:
         # chunk,n_retrained,loss,accuracy
-        file.write(f"{chunk_number},{len(valid) - sum(valid)},{validation_loss / n_examples},{n_correct / n_examples}\n")
+        file.write(
+            f"{chunk_number},{len(valid) - sum(valid)},{validation_loss / n_examples},{n_correct / n_examples}\n"
+        )
 
 
-
-def train_individual(model, optimizer, criterion, train_loader, test_loader, model_number, chunk_number, epochs, device):
+def train_individual(
+    model, optimizer, criterion, train_loader, test_loader, model_number, chunk_number, is_valid, epochs, device
+):
     for epoch in (progress_bar := tqdm.tqdm(range(epochs), desc=f"Training model {model_number}")):
         model.train()
         for examples, labels in train_loader:
@@ -171,8 +187,11 @@ def train_individual(model, optimizer, criterion, train_loader, test_loader, mod
         )
 
         with open(f"ensemble_training_results.csv", "a") as file:
-            # model,chunk,epoch,loss,accuracy
-            file.write(f"{model_number},{chunk_number},{epoch},{validation_loss / n_examples},{n_correct / n_examples}\n")
+            # model,chunk,valid,epoch,loss,accuracy
+            file.write(
+                f"{model_number},{chunk_number},{is_valid},{epoch},{validation_loss / n_examples},{n_correct / n_examples}\n"
+            )
+
 
 if __name__ == "__main__":
     main()
